@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -207,19 +208,28 @@ func (r Rsync) StderrPipe() (io.ReadCloser, error) {
 	return r.cmd.StderrPipe()
 }
 
-// Run start rsync task
-func (r Rsync) Run() error {
+// Start starts rsync command
+func (r Rsync) Start() error {
 	if !isExist(r.Destination) {
 		if err := createDir(r.Destination); err != nil {
 			return err
 		}
 	}
 
-	if err := r.cmd.Start(); err != nil {
+	return r.cmd.Start()
+}
+
+// Wait waits for rsync command to finnish
+func (r Rsync) Wait() error {
+	return r.cmd.Wait()
+}
+
+// Run start rsync task. The method is kept here for backward compatibility
+func (r Rsync) Run() error {
+	if err := r.Start(); err != nil {
 		return err
 	}
-
-	return r.cmd.Wait()
+	return r.Wait()
 }
 
 // NewRsync returns task with described options
@@ -235,6 +245,27 @@ func NewRsync(source, destination string, options RsyncOptions) *Rsync {
 		Source:      source,
 		Destination: destination,
 		cmd:         exec.Command(binaryPath, arguments...),
+	}
+}
+
+// NewCustomRsync returns task with described options
+func NewCustomRsync(bin string, sources []string, destination string, options RsyncOptions, workdir string, envs ...string) *Rsync {
+	arguments := append(append(getArguments(options), append([]string{"--"}, sources...)...), destination)
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %s", bin, strings.Join(arguments, " ")))
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/V", "/C", fmt.Sprintf("%s %s", bin, strings.Join(arguments, " ")))
+	}
+
+	cmd.Env = append(os.Environ(), envs...)
+
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+
+	return &Rsync{
+		Source:      strings.Join(sources, ","),
+		Destination: destination,
+		cmd:         cmd,
 	}
 }
 

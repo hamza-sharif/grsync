@@ -50,23 +50,28 @@ func (t *Task) Run() error {
 	if err != nil {
 		return err
 	}
-	defer stderr.Close()
 
 	stdout, err := t.rsync.StdoutPipe()
 	if err != nil {
+		stderr.Close()
 		return err
 	}
-	defer stdout.Close()
 
 	var wg sync.WaitGroup
 	go processStdout(&wg, t, stdout)
 	go processStderr(&wg, t, stderr)
 	wg.Add(2)
 
-	err = t.rsync.Run()
 	wg.Wait()
+	if err = t.rsync.Start(); err != nil {
+		// Close pipes to unblock goroutines
+		stdout.Close()
+		stderr.Close()
+		wg.Wait()
+		return err
+	}
 
-	return err
+	return t.rsync.Wait()
 }
 
 // NewTask returns new rsync task
@@ -79,6 +84,21 @@ func NewTask(source, destination string, rsyncOptions RsyncOptions) *Task {
 
 	return &Task{
 		rsync: NewRsync(source, destination, rsyncOptions),
+		state: &State{},
+		log:   &Log{},
+	}
+}
+
+// NewCustomTask returns new rsync task with custom binary
+func NewCustomTask(bin string, source []string, destination string, rsyncOptions RsyncOptions, workdir string, envs ...string) *Task {
+	// Force set required options
+	rsyncOptions.HumanReadable = true
+	rsyncOptions.Partial = true
+	rsyncOptions.Progress = true
+	rsyncOptions.Archive = true
+
+	return &Task{
+		rsync: NewCustomRsync(bin, source, destination, rsyncOptions, workdir, envs...),
 		state: &State{},
 		log:   &Log{},
 	}
